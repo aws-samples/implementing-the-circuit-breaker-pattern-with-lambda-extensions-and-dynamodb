@@ -1,0 +1,129 @@
+AWSTemplateFormatVersion: 2010-09-09
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  circuit-breaker-lambda-extension
+  
+  Sample SAM Template for circuit-breaker-lambda-extension
+
+Globals:
+  Function:
+    Timeout: 5
+
+Resources:
+
+# Lambda extension for monitoring the states
+
+  CircuitBreakerExtensionLayer:
+    Type: AWS::Serverless::LayerVersion
+    Metadata:
+      BuildMethod: makefile
+    Properties:
+      Description: Circuit Breaker Extension Layer
+      ContentUri: extensionsrc/
+      CompatibleRuntimes:
+      - python3.12
+      LicenseInfo: MIT-0
+      RetentionPolicy: Delete
+
+# Microservice that will make use of the extension to get the status of the circuits
+  MyMicroservice:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: my-microservice/
+      Handler: lambda_function.lambda_handler
+      MemorySize: 128
+      Policies:
+      - DynamoDBCrudPolicy:
+          TableName: !Ref CircuitBreakerStateTable
+      Timeout: 100
+      Runtime: python3.12
+      Layers:
+      - !Ref CircuitBreakerExtensionLayer
+      Environment:
+        Variables:
+          service_name: "MyMicroservice"
+          table_name: !Ref CircuitBreakerStateTable
+          ttl: 30
+          API_URL: !Sub "https://${MockMicroserviceApiGateway}.execute-api.${AWS::Region}.amazonaws.com/prod/api/resource"
+
+### Mock external service for testing the solution
+
+  MockMicroserviceApiGateway:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: prod
+      MethodSettings:
+        - ResourcePath: /
+          HttpMethod: GET
+
+  MockMicroserviceAPIFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: mock-microservice/
+      Handler: handler.lambda_handler
+      Runtime: python3.12
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Path: /api/{proxy+}
+            Method: ANY
+            RestApiId:
+              Ref: MockMicroserviceApiGateway
+
+### DynamoDB table to store the state of circuits
+  
+  CircuitBreakerStateTable:
+    Type: AWS::Serverless::SimpleTable
+
+### Lambda function that monitor that mantains the state of the circuits
+
+  UpdatingStateLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: updating-state-lambda/
+      Handler: lambda_function.lambda_handler
+      MemorySize: 128
+      Policies:
+      - DynamoDBCrudPolicy:
+          TableName: !Ref CircuitBreakerStateTable
+      Timeout: 100
+      Runtime: python3.12
+      Environment:
+        Variables:
+          table_name: !Ref CircuitBreakerStateTable
+
+### Rules that represent the external services to monitor
+
+  MyEventRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: Event rule to trigger the Lambda function with a JSON payload
+      ScheduleExpression: rate(1 minute)  # Set the schedule to run every minute
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt UpdatingStateLambda.Arn
+          Id: TargetFunction
+          Input: !Sub '{ "URL": "https://${MockMicroserviceApiGateway}.execute-api.${AWS::Region}.amazonaws.com/prod/api/resource/health", "ID": "MyMicroservice"}'  # Add the JSON payload here
+
+  MyPermissionForEventRule:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref UpdatingStateLambda
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt MyEventRule.Arn
+      
+Outputs:
+  CircuitBreakerExtensionLayer:
+    Description: Circuit Breaker Extension Layer Version ARN
+    Value: !Ref CircuitBreakerExtensionLayer
+  MyMicroservice:
+    Description: My Microservice ARN
+    Value: !GetAtt MyMicroservice.Arn
+  UpdatingStateLambda:
+    Description: Updating State Lambda Function ARN
+    Value: !GetAtt UpdatingStateLambda.Arn
+  ApiEndpoint:
+    Description: URL endpoint of the API
+    Value: !Sub "https://${MockMicroserviceApiGateway}.execute-api.${AWS::Region}.amazonaws.com/prod/"

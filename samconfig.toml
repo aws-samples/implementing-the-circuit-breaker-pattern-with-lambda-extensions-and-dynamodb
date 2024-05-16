@@ -1,0 +1,9 @@
+version = 0.1
+[default.deploy.parameters]
+stack_name = "new-circuit-breaker-sam-stack"
+resolve_s3 = true
+s3_prefix = "new-circuit-breaker-sam-stack"
+region = "us-east-1"
+capabilities = "CAPABILITY_IAM"
+disable_rollback = false
+image_repositories = []
