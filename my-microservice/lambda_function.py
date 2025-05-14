@@ -34,13 +34,13 @@ def lambda_handler(event, context):
         raise KeyError("Specified service ID not found in DynamoDB")
     
     # Logic depending on service status
-    if service_status == 'OPEN':
+    if service_status == 'CLOSED':
         response = requests.get(API_URL, headers=headers)
         http_status_code = response.status_code
         message = response.json().get("message")
     else:
         http_status_code = 500
-        message = "Service is not open"
+        message = "Service is not closed"
         
     return {
         'status code': http_status_code,

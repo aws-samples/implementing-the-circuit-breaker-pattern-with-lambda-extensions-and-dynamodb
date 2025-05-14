@@ -22,9 +22,9 @@ def lambda_handler(event, context):
     try:
         requests.get(API_URL, headers=headers, timeout=4)
         api_call_succeeded = True
-        service_status = "OPEN"
-    except requests.exceptions.Timeout:
         service_status = "CLOSED"
+    except requests.exceptions.Timeout:
+        service_status = "OPEN"
     
     # Update the DynamoDB entry with the new status
     table.update_item(
